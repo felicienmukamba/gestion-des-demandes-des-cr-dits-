@@ -1,0 +1,202 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  CREDIT_AGENT
+  CREDIT_COMMISSION
+  CASHIER
+  ADMIN
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  REPAYMENT
+  TRANSFER_OUT
+  TRANSFER_IN
+}
+
+enum CreditStatus {
+  PENDING
+  UNDER_ANALYSIS
+  COMMISSION_APPROVED
+  COMMISSION_REJECTED
+  AGENT_VALIDATED
+  AGENT_REJECTED
+  APPROVED
+  REJECTED
+  ACTIVE
+  COMPLETED
+}
+
+enum AccountType {
+  SAVINGS
+  CREDIT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  phone     String?
+  role      Role     @default(CLIENT)
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  active    Boolean  @default(true)
+
+  // Relations
+  accounts      Account[]
+  creditRequests CreditRequest[]
+  transactions  Transaction[]
+  createdUsers  User[]   @relation("UserCreator")
+  createdBy     User?    @relation("UserCreator", fields: [createdById], references: [id])
+  createdById   String?
+
+  @@map("users")
+}
+
+model Account {
+  id        String      @id @default(uuid())
+  accountNumber String  @unique
+  type      AccountType
+  balance   Decimal     @default(0) @db.Decimal(15, 2)
+  userId    String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relations
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions        Transaction[]
+  transfersOut        Transaction[] @relation("TransferOut")
+  transfersIn         Transaction[] @relation("TransferIn")
+  creditRequests      CreditRequest[]
+
+  @@map("accounts")
+}
+
+model CreditRequest {
+  id              String       @id @default(uuid())
+  amount          Decimal      @db.Decimal(15, 2)
+  purpose         String
+  status          CreditStatus @default(PENDING)
+  interestRate    Decimal?     @db.Decimal(5, 4)
+  duration        Int?         // in months
+  monthlyPayment  Decimal?     @db.Decimal(15, 2)
+  commissionNote  String?
+  agentNote       String?
+  rejectionReason String?
+  approvedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  userId      String
+  accountId   String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  documents   Document[]
+  credit      Credit?
+
+  @@map("credit_requests")
+}
+
+model Credit {
+  id               String    @id @default(uuid())
+  creditRequestId  String    @unique
+  principalAmount  Decimal   @db.Decimal(15, 2)
+  remainingAmount  Decimal   @db.Decimal(15, 2)
+  interestRate     Decimal   @db.Decimal(5, 4)
+  duration         Int       // in months
+  monthlyPayment   Decimal   @db.Decimal(15, 2)
+  nextPaymentDate  DateTime
+  isCompleted      Boolean   @default(false)
+  penaltyAmount    Decimal   @default(0) @db.Decimal(15, 2)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  creditRequest CreditRequest @relation(fields: [creditRequestId], references: [id], onDelete: Cascade)
+  repayments    Repayment[]
+
+  @@map("credits")
+}
+
+model Repayment {
+  id            String    @id @default(uuid())
+  creditId      String
+  amount        Decimal   @db.Decimal(15, 2)
+  principalPaid Decimal   @db.Decimal(15, 2)
+  interestPaid  Decimal   @db.Decimal(15, 2)
+  penaltyPaid   Decimal   @default(0) @db.Decimal(15, 2)
+  paymentDate   DateTime  @default(now())
+  dueDate       DateTime
+  isLate        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  // Relations
+  credit Credit @relation(fields: [creditId], references: [id], onDelete: Cascade)
+
+  @@map("repayments")
+}
+
+model Document {
+  id              String @id @default(uuid())
+  filename        String
+  filepath        String
+  documentType    String
+  creditRequestId String
+  createdAt       DateTime @default(now())
+
+  // Relations
+  creditRequest CreditRequest @relation(fields: [creditRequestId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model Transaction {
+  id            String          @id @default(uuid())
+  type          TransactionType
+  amount        Decimal         @db.Decimal(15, 2)
+  description   String?
+  reference     String?         @unique
+  userId        String
+  accountId     String
+  toAccountId   String?         // For transfers
+  fromAccountId String?         // For transfers
+  processedBy   String?         // User who processed (for cashier operations)
+  createdAt     DateTime        @default(now())
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id])
+  account     Account  @relation(fields: [accountId], references: [id])
+  toAccount   Account? @relation("TransferIn", fields: [toAccountId], references: [id])
+  fromAccount Account? @relation("TransferOut", fields: [fromAccountId], references: [id])
+
+  @@map("transactions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String
+  entityType  String
+  entityId    String
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@map("audit_logs")
+}
